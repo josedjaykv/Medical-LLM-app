@@ -103,7 +103,7 @@ Para ejecutar la aplicación Streamlit localmente:
 3.  **Activa el entorno virtual:**
     *   **Windows:**
         ```bash
-          .venv\Scripts\activate
+        .venv\Scripts\activate
         ```
     *   **macOS/Linux:**
         ```bash
