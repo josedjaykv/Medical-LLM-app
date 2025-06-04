@@ -1,6 +1,10 @@
+# streamlit_app.py
+
 import streamlit as st
 import requests
 import json
+import base64
+import tempfile
 from datetime import datetime
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
@@ -13,7 +17,9 @@ DIAG_URL       = "https://generatediagnosis-c5n2v3ikiq-uc.a.run.app"
 
 st.set_page_config(page_title="App Médica LLM", layout="centered")
 st.title("📋 Procesamiento Médico con LLMs")
-st.markdown("Sube un link de audio o ingresa texto libre para extraer datos médicos y generar diagnóstico.")
+st.markdown(
+    "Sube un link de audio, graba directamente o ingresa texto libre para extraer datos médicos y generar diagnóstico."
+)
 
 # ------------------ SESSION STATE ------------------
 if "history" not in st.session_state:
@@ -37,23 +43,26 @@ def generar_reporte_pdf(input_text, extracted_data, diagnosis):
             if y < 80:
                 c.showPage()
                 y = height - 50
-            c.drawString(x + 10, y, line[:1000])  # trunca si es muy largo
+            c.drawString(x + 10, y, line[:1000])
             y -= 13
         y -= 10
 
-    # ---- CONTENIDO DEL REPORTE ----
     c.setFont("Helvetica-Bold", 14)
     c.drawString(x, y, "🩺 Reporte Médico Automatizado")
     y -= 25
 
     draw_text("📝 Texto Procesado:", input_text)
-    draw_text("📁 Información Médica Extraída:", json.dumps(extracted_data, indent=2, ensure_ascii=False))
+    draw_text(
+        "📁 Información Médica Extraída:",
+        json.dumps(extracted_data, indent=2, ensure_ascii=False),
+    )
     draw_text("👨‍⚕️ Diagnóstico:", json.dumps(diagnosis, indent=2, ensure_ascii=False))
 
     c.showPage()
     c.save()
     buffer.seek(0)
     return buffer
+
 
 def show_diagnosis_pipeline(input_text):
     st.write("### 🧠 Texto recibido:")
@@ -88,37 +97,40 @@ def show_diagnosis_pipeline(input_text):
         st.subheader("👨‍⚕️ Diagnóstico Resultado:")
         st.json(diag_data)
 
-        # Agregar al historial
-        st.session_state.history.append({
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "input_text": input_text,
-            "extracted_data": ext_data,
-            "diagnosis": diag_data
-        })
+        st.session_state.history.append(
+            {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "input_text": input_text,
+                "extracted_data": ext_data,
+                "diagnosis": diag_data,
+            }
+        )
 
-        # Botón para descargar diagnóstico como JSON
         st.download_button(
             label="📥 Descargar Diagnóstico JSON",
             data=json.dumps(diag_data, indent=2, ensure_ascii=False),
             file_name="diagnostico.json",
-            mime="application/json"
+            mime="application/json",
         )
 
-        # Botón para descargar reporte en PDF
         pdf_file = generar_reporte_pdf(input_text, ext_data, diag_data)
         st.download_button(
             label="🧾 Descargar Reporte PDF",
             data=pdf_file,
             file_name="reporte_medico.pdf",
-            mime="application/pdf"
+            mime="application/pdf",
         )
     else:
         st.warning("⚠️ No se recibió un diagnóstico válido.")
 
-# ------------------ OPCIÓN DE ENTRADA ------------------
-source = st.radio("¿Cómo quieres enviar la info?", ("Audio (link)", "Texto Libre"))
 
-# ------------------ AUDIO ------------------
+# ------------------ OPCIÓN DE ENTRADA ------------------
+source = st.radio(
+    "¿Cómo quieres enviar la info?",
+    ("Audio (link)", "Grabar Audio", "Texto Libre"),
+)
+
+# ------------------ AUDIO: ENLACE ------------------
 if source == "Audio (link)":
     audio_url = st.text_input("🎵 Pega aquí el link del audio (mp3, wav, etc.)")
     if st.button("Procesar Audio"):
@@ -140,6 +152,35 @@ if source == "Audio (link)":
                 show_diagnosis_pipeline(texto_transcrito)
             else:
                 st.warning("⚠️ No se pudo obtener texto transcrito.")
+
+# ------------------ AUDIO: GRABAR DIRECTAMENTE ------------------
+elif source == "Grabar Audio":
+    st.write("🎙️ Haz clic en el botón y graba tu mensaje de voz.")
+    audio_value = st.audio_input("Grabar Audio")  # Devuelve UploadedFile
+
+    if audio_value is not None:
+        st.success("🎉 Grabación completada.")
+        # Leemos bytes del UploadedFile
+        wav_bytes = audio_value.read()
+        # Codificamos a base64
+        b64 = base64.b64encode(wav_bytes).decode("utf-8")
+
+        with st.spinner("🔊 Enviando grabación base64 para transcripción..."):
+            try:
+                payload = {"audioBase64": b64}
+                trans_res = requests.post(TRANSCRIBE_URL, json=payload)
+                trans_res.raise_for_status()
+                trans_data = trans_res.json()
+                texto_transcrito = trans_data.get("transcription", "").strip()
+            except Exception as e:
+                st.error(f"❌ Error al transcribir grabación: {e}")
+                texto_transcrito = None
+
+        if texto_transcrito:
+            st.success("✅ Transcripción completada.")
+            show_diagnosis_pipeline(texto_transcrito)
+        else:
+            st.warning("⚠️ No se pudo obtener texto transcrito de la grabación.")
 
 # ------------------ TEXTO LIBRE ------------------
 elif source == "Texto Libre":

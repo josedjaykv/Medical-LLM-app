@@ -1,60 +1,34 @@
-// functions/index.js
-
+// index.js (funciones Firebase)
 /* eslint-disable */
 
-////////////////////////////////////////////////////////////////////////////
-//  IMPORTACIONES
-////////////////////////////////////////////////////////////////////////////
-
-// SDK v1 for functions.config() (si lo necesitas para 1st Gen)
-const functionsV1 = require("firebase-functions");
-
-// SDK v2 for Gen 2: onRequest, logger, defineSecret
+const formidable = require("formidable");
+const fs = require("fs");
+const axios = require("axios");
+const tmp = require("tmp");
+const { OpenAI } = require("openai");
 const { onRequest } = require("firebase-functions/v2/https");
 const { logger } = require("firebase-functions/v2");
 const { defineSecret } = require("firebase-functions/params");
-
 const cors = require("cors")({ origin: true });
-const axios = require("axios");
-const fs = require("fs");
-const tmp = require("tmp");
-const { OpenAI } = require("openai");
 
-////////////////////////////////////////////////////////////////////////////
-//  SECURE API KEY MANAGEMENT (Gen 2 usando defineSecret)
-////////////////////////////////////////////////////////////////////////////
-
-// Asegúrate de haber corrido:
-//    firebase functions:secrets:set OPENAI_API_KEY="TU_API_KEY"
-
-// Define el secreto
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
-
-// Cliente OpenAI global, inicialización perezosa
 let openaiClientInstance;
 function getOpenAIClient() {
   if (!openaiClientInstance) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       logger.error("OpenAI API key not configured or not accessible.");
-      throw new Error("OpenAI API key is missing. Please ensure it's set as a secret.");
+      throw new Error("OpenAI API key is missing.");
     }
-    openaiClientInstance = new OpenAI({ apiKey: apiKey });
+    openaiClientInstance = new OpenAI({ apiKey });
   }
   return openaiClientInstance;
 }
 
-////////////////////////////////////////////////////////////////////////////
-//  JSON SCHEMAS
-////////////////////////////////////////////////////////////////////////////
-
 const extractSchema = {
   type: "object",
   properties: {
-    sintomas: {
-      type: "array",
-      items: { type: "string" },
-    },
+    sintomas: { type: "array", items: { type: "string" } },
     paciente: {
       type: "object",
       properties: {
@@ -79,12 +53,8 @@ const diagSchema = {
   required: ["diagnostico", "tratamiento", "recomendaciones"],
 };
 
-////////////////////////////////////////////////////////////////////////////
-//  FUNCIONES SERVERLESS (Gen 2 usando onRequest)
-////////////////////////////////////////////////////////////////////////////
-
 ////////////////////////////////////////////////////////////////////////////////
-// Función #1: Transcribir Audio
+// Función #1: Transcribir Audio (soporta URL y Base64)
 ////////////////////////////////////////////////////////////////////////////////
 
 exports.transcribeAudio = onRequest(
@@ -99,15 +69,39 @@ exports.transcribeAudio = onRequest(
           return res.status(405).json({ error: "Solo se permite el método POST." });
         }
 
+        // Si viene base64 en JSON: { audioBase64: "..." }
+        if (req.body.audioBase64) {
+          const b64 = req.body.audioBase64;
+          // Decodificar base64 a bytes y guardar temp .wav
+          const buffer = Buffer.from(b64, "base64");
+          const tempFile = tmp.fileSync({ postfix: ".wav" });
+          fs.writeFileSync(tempFile.name, buffer);
+
+          const currentOpenAI = getOpenAIClient();
+          try {
+            const whisperResponse = await currentOpenAI.audio.transcriptions.create({
+              file: fs.createReadStream(tempFile.name),
+              model: "whisper-1",
+              response_format: "text",
+            });
+            tempFile.removeCallback();
+            return res.status(200).json({ transcription: whisperResponse });
+          } catch (whisperErr) {
+            logger.error("Error al transcribir base64 con Whisper:", whisperErr);
+            tempFile.removeCallback();
+            return res.status(500).json({ error: "Falla al transcribir audio." });
+          }
+        }
+
+        // Si viene JSON con { audioUrl }
         const { audioUrl } = req.body;
         if (!audioUrl || typeof audioUrl !== "string") {
           return res.status(400).json({ error: "Campo 'audioUrl' inválido o faltante." });
         }
 
-        // 1) Descarga el audio a un archivo temporal
-        const tempFile = tmp.fileSync({ postfix: ".mp3" }); // O ".wav" si tu audio es WAV
+        // Descargar audio a temp
+        const tempFile = tmp.fileSync({ postfix: ".wav" });
         const writer = fs.createWriteStream(tempFile.name);
-
         let downloadResponse;
         try {
           downloadResponse = await axios({
@@ -116,9 +110,11 @@ exports.transcribeAudio = onRequest(
             responseType: "stream",
           });
         } catch (downloadErr) {
-          logger.error("Error al descargar el audio:", downloadErr);
+          logger.error("Error al descargar audio (URL):", downloadErr);
           tempFile.removeCallback();
-          return res.status(400).json({ error: "No se pudo descargar el audio desde la URL proporcionada." });
+          return res
+            .status(400)
+            .json({ error: "No se pudo descargar el audio desde la URL proporcionada." });
         }
 
         await new Promise((resolve, reject) => {
@@ -127,30 +123,22 @@ exports.transcribeAudio = onRequest(
           writer.on("error", reject);
         });
 
-        // 2) Enviar el archivo temporal a Whisper
         const currentOpenAI = getOpenAIClient();
-        let transcription;
         try {
           const whisperResponse = await currentOpenAI.audio.transcriptions.create({
             file: fs.createReadStream(tempFile.name),
             model: "whisper-1",
             response_format: "text",
           });
-          // Whisper retorna directamente el texto si response_format:"text"
-          transcription = whisperResponse;
-        } catch (whisperErr) {
-          logger.error("Error al transcribir con Whisper:", whisperErr);
           tempFile.removeCallback();
-          return res.status(500).json({ error: "Falla al transcribir audio con Whisper." });
+          return res.status(200).json({ transcription: whisperResponse });
+        } catch (whisperErr) {
+          logger.error("Error al transcribir con Whisper (URL):", whisperErr);
+          tempFile.removeCallback();
+          return res.status(500).json({ error: "Falla al transcribir audio." });
         }
-
-        // 3) Eliminar el archivo temporal
-        tempFile.removeCallback();
-
-        // 4) Responder con la transcripción
-        return res.status(200).json({ transcription });
       } catch (error) {
-        logger.error("Error en transcripción (función 1):", error);
+        logger.error("Error en transcripción:", error);
         return res.status(500).json({ error: "Falla al transcribir audio." });
       }
     });
@@ -224,7 +212,7 @@ Texto de entrada:
 
         return res.status(200).json(parsed);
       } catch (error) {
-        logger.error("Error en extracción médica (función 2):", error);
+        logger.error("Error en extracción médica:", error);
         return res.status(500).json({ error: "Falla al extraer info médica." });
       }
     });
@@ -304,7 +292,7 @@ Devuelve SOLO el JSON, sin explicaciones ni etiquetas.
 
         return res.status(200).json(parsed);
       } catch (error) {
-        logger.error("Error generando diagnóstico (función 3):", error);
+        logger.error("Error generando diagnóstico:", error);
         return res.status(500).json({ error: "Falla al generar diagnóstico." });
       }
     });

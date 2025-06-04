@@ -18,6 +18,7 @@
     "cors": "^2.8.5",
     "firebase-admin": "^12.6.0",
     "firebase-functions": "^6.3.2",
+    "formidable": "^3.5.4",
     "openai": "^5.1.0",
     "tmp": "^0.2.3"
   },
