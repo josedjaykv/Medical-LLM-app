@@ -1,11 +1,3 @@
-# Medical-LLM-app
-
-Claro, aquí tienes la documentación para tu proyecto, incluyendo el contenido para tu archivo `README.md` y las instrucciones detalladas para la ejecución local y la configuración de APIs.
-
----
-
-## README.md
-
 # Medical LLM App
 
 ## Descripción Técnica Breve
@@ -32,7 +24,6 @@ El flujo de la aplicación está diseñado para ser intuitivo y procesar la info
 
 ## Decisiones de Diseño Relevantes
 
-*   **Arquitectura Serverless con Firebase Cloud Functions (2nd Gen):** Se eligió Firebase Cloud Functions de segunda generación por su escalabilidad automática, eficiencia de costos (pago por uso) y la facilidad de despliegue y gestión que ofrece Firebase. Al estar construidas sobre Cloud Run, estas funciones proporcionan mayor concurrencia y control sobre los recursos, lo que es ideal para cargas de trabajo variables como las interacciones con LLMs.
 *   **Modelos de Lenguaje Grandes (LLMs) de OpenAI:** La integración con OpenAI (Whisper para Speech-to-Text y GPT-4o para procesamiento de texto) permite aprovechar capacidades de IA de vanguardia para la transcripción precisa y la comprensión contextual de la información médica. GPT-4o fue seleccionado por su capacidad para seguir instrucciones de formato JSON y su rendimiento en tareas de razonamiento.
 *   **Gestión Segura de API Keys:** Para la seguridad de las credenciales de OpenAI, se utiliza el mecanismo de Firebase Secrets (`defineSecret`). Esto asegura que la API Key no se exponga en el código fuente ni en variables de entorno no seguras, sino que se inyecte de forma segura en el entorno de ejecución de las funciones.
 *   **Frontend Interactivo con Streamlit:** Streamlit fue elegido por su capacidad para construir rápidamente aplicaciones web interactivas en Python con un código mínimo. Esto permite un desarrollo ágil de la interfaz de usuario para la interacción con el usuario y la visualización de los resultados.
@@ -51,7 +42,7 @@ Para el correcto funcionamiento de la aplicación, es necesario configurar la si
 
 ### Prerrequisitos
 
-Asegúrate de tener instalados los siguientes componentes en tu sistema:
+Asegurarse de tener instalados los siguientes componentes en tu sistema:
 
 *   **Node.js y npm:** Necesarios para las funciones de Firebase.
 *   **Python y pip:** Necesarios para la aplicación Streamlit.
